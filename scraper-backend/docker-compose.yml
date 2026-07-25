@@ -22,6 +22,11 @@ services:
     shm_size: "1gb"
     tmpfs:
       - /tmp
+    # /data persists the Chromium userDataDir and the exported cookie
+    # storageState across container rebuilds — this is what keeps the
+    # 1688 session signed in.
+    volumes:
+      - scraper-data:/data
     security_opt:
       - no-new-privileges:true
     # Chromium's own sandbox is disabled inside the container (see
@@ -32,3 +37,7 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+volumes:
+  scraper-data:
+
