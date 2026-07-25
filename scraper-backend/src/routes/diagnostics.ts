@@ -160,6 +160,60 @@ const SEARCH_INPUT_SELECTORS = [
  */
 const RESULTS_URL_PATTERN = /(s\.1688\.com|offer_search|\/selloffer\/)/i;
 
+/**
+ * Shared search-navigation helper. Loads the 1688 homepage, submits the
+ * keyword, and waits until the results page URL is reached and the page
+ * has finished loading. Throws HttpError on unrecoverable problems.
+ *
+ * Kept here so Phase 4.2 (`/search`) and Phase 4.3 (`/search-extract`)
+ * behave identically — navigation is not duplicated between routes.
+ */
+async function navigateToSearchResults(
+  page: import("playwright").Page,
+  keyword: string,
+  timeoutMs: number,
+): Promise<void> {
+  // 1. Load the homepage.
+  await page.goto(HOMEPAGE_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: timeoutMs,
+  });
+
+  // 2. Find the first visible search input.
+  let filled = false;
+  for (const selector of SEARCH_INPUT_SELECTORS) {
+    const input = page.locator(selector).first();
+    try {
+      await input.waitFor({ state: "visible", timeout: 3_000 });
+      await input.fill(keyword);
+      filled = true;
+      break;
+    } catch {
+      // try next selector
+    }
+  }
+  if (!filled) {
+    throw new HttpError({
+      status: 502,
+      code: "upstream_unavailable",
+      message:
+        "Search input not found on 1688 homepage. Selectors may be stale.",
+      retryable: true,
+    });
+  }
+
+  // 3. Submit and wait for the results URL.
+  await Promise.all([
+    page.waitForURL(RESULTS_URL_PATTERN, { timeout: timeoutMs }),
+    page.keyboard.press("Enter"),
+  ]);
+
+  // 4. Wait until the results page is fully loaded.
+  await page
+    .waitForLoadState("networkidle", { timeout: timeoutMs })
+    .catch(() => page.waitForLoadState("load", { timeout: timeoutMs }));
+}
+
 diagnosticsRouter.get(
   "/search",
   async (req: Request, res: Response, next: NextFunction) => {
@@ -177,54 +231,10 @@ diagnosticsRouter.get(
       const startedAt = Date.now();
       const result = await withContext(async (ctx) => {
         const page = await ctx.newPage();
-
-        // 1. Load the homepage.
-        await page.goto(HOMEPAGE_URL, {
-          waitUntil: "domcontentloaded",
-          timeout: timeoutMs,
-        });
-
-        // 2. Find the first visible search input.
-        let filled = false;
-        for (const selector of SEARCH_INPUT_SELECTORS) {
-          const input = page.locator(selector).first();
-          try {
-            await input.waitFor({ state: "visible", timeout: 3_000 });
-            await input.fill(keyword);
-            filled = true;
-            break;
-          } catch {
-            // try next selector
-          }
-        }
-        if (!filled) {
-          throw new HttpError({
-            status: 502,
-            code: "upstream_unavailable",
-            message:
-              "Search input not found on 1688 homepage. Selectors may be stale.",
-            retryable: true,
-          });
-        }
-
-        // 3. Submit the search and wait for the results page URL.
-        await Promise.all([
-          page.waitForURL(RESULTS_URL_PATTERN, { timeout: timeoutMs }),
-          page.keyboard.press("Enter"),
-        ]);
-
-        // 4. Wait until the results page is fully loaded (network settles).
-        await page
-          .waitForLoadState("networkidle", { timeout: timeoutMs })
-          .catch(() => {
-            // networkidle is best-effort on ad-heavy pages; fall back to 'load'.
-            return page.waitForLoadState("load", { timeout: timeoutMs });
-          });
-
+        await navigateToSearchResults(page, keyword, timeoutMs);
         const currentUrl = page.url();
         const pageTitle = await page.title();
         const resultPageLoaded = RESULTS_URL_PATTERN.test(currentUrl);
-
         await page.close();
         return { currentUrl, pageTitle, resultPageLoaded };
       });
@@ -241,7 +251,6 @@ diagnosticsRouter.get(
         "diagnostics: search navigation complete",
       );
 
-      // Raw diagnostic shape, matches the Phase 4.2 contract exactly.
       res.status(200).json({
         success: true,
         keyword,
@@ -256,4 +265,73 @@ diagnosticsRouter.get(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Phase 4.3 — Search-result extraction diagnostic
+// ---------------------------------------------------------------------------
+
+const SearchExtractQuerySchema = SearchQuerySchema.extend({
+  limit: z.coerce.number().int().min(1).max(10).optional(),
+});
+
+diagnosticsRouter.get(
+  "/search-extract",
+  async (req: Request, res: Response, next: NextFunction) => {
+    (req.params as { provider?: string }).provider = "diagnostics";
+    try {
+      const query = SearchExtractQuerySchema.parse(req.query);
+      const keyword = query.keyword.trim();
+      const timeoutMs = query.timeoutMs ?? env.UPSTREAM_TIMEOUT_MS;
+      const limit = query.limit ?? 10;
+
+      logger.info(
+        { requestId: req.requestId, keyword, timeoutMs, limit },
+        "diagnostics: search-extract start",
+      );
+
+      const products = await withContext(async (ctx) => {
+        const page = await ctx.newPage();
+        await navigateToSearchResults(page, keyword, timeoutMs);
+
+        // Lazy-load selectors are isolated in the parser module. Route
+        // logic must never contain DOM selectors — see search-results.ts.
+        const { extractSearchResults } = await import(
+          "../providers/sourcing1688/parsers/search-results.js"
+        );
+        const rows = await extractSearchResults(page, limit);
+        await page.close();
+        return rows;
+      });
+
+      if (products.length === 0) {
+        // No fake data — surface a descriptive error envelope instead.
+        return next(
+          new HttpError({
+            status: 502,
+            code: "parse_failed",
+            message:
+              "No product cards could be extracted from the 1688 results page. The DOM structure may have changed.",
+            retryable: false,
+          }),
+        );
+      }
+
+      logger.info(
+        { requestId: req.requestId, keyword, count: products.length },
+        "diagnostics: search-extract complete",
+      );
+
+      res.status(200).json({
+        success: true,
+        keyword,
+        count: products.length,
+        products,
+      });
+    } catch (err) {
+      if (err instanceof HttpError) return next(err);
+      return next(mapPlaywrightError(err));
+    }
+  },
+);
+
 
