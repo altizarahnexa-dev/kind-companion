@@ -15,6 +15,7 @@ import {
 import { extractSearchResults } from "./parsers/search-results.js";
 import { extractProductDetail } from "./parsers/product-detail.js";
 import { extractProductVariants } from "./parsers/product-variants.js";
+import { captureParseFailure } from "../../lib/debug-capture.js";
 
 /**
  * 1688 provider routes — the sourcing contract endpoints.
