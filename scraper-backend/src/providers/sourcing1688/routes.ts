@@ -16,6 +16,7 @@ import { extractSearchResults } from "./parsers/search-results.js";
 import { extractProductDetail } from "./parsers/product-detail.js";
 import { extractProductVariants } from "./parsers/product-variants.js";
 import { captureParseFailure } from "../../lib/debug-capture.js";
+import { detectLoginWall } from "../../lib/login-detect.js";
 
 /**
  * 1688 provider routes — the sourcing contract endpoints.
@@ -165,13 +166,56 @@ sourcing1688Router.get(
       const raw = await withContext(async (ctx) => {
         const page = await ctx.newPage();
         try {
-          await navigateToSearchResults(page, keyword, {
-            pageNum: query.page,
-            sort: query.sort,
-            timeoutMs,
-          });
+          try {
+            await navigateToSearchResults(page, keyword, {
+              pageNum: query.page,
+              sort: query.sort,
+              timeoutMs,
+            });
+          } catch (navErr) {
+            const wall = await detectLoginWall(page);
+            if (wall.isLoginWall) {
+              throw new HttpError({
+                status: 503,
+                code: "authentication_required",
+                message:
+                  "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+                retryable: false,
+                details: { phase: "navigate", url: wall.url, reason: wall.reason },
+              });
+            }
+            throw navErr;
+          }
+
+          const wall = await detectLoginWall(page);
+          if (wall.isLoginWall) {
+            throw new HttpError({
+              status: 503,
+              code: "authentication_required",
+              message:
+                "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+              retryable: false,
+              details: { phase: "post_navigate", url: wall.url, reason: wall.reason },
+            });
+          }
+
           const results = await extractSearchResults(page, query.pageSize);
           if (results.length === 0) {
+            const wallAfterParse = await detectLoginWall(page);
+            if (wallAfterParse.isLoginWall) {
+              throw new HttpError({
+                status: 503,
+                code: "authentication_required",
+                message:
+                  "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+                retryable: false,
+                details: {
+                  phase: "parse",
+                  url: wallAfterParse.url,
+                  reason: wallAfterParse.reason,
+                },
+              });
+            }
             const capture = await captureParseFailure(page, {
               requestId: req.requestId,
               phase: "parse",
