@@ -58,7 +58,9 @@ diagnosticsRouter.get(
     try {
       const query = QuerySchema.parse(req.query);
       const targetUrl = query.url ?? DEFAULT_URL;
-      const timeoutMs = query.timeoutMs ?? env.UPSTREAM_TIMEOUT_MS;
+      // 1688 is heavy with ads/analytics; waiting for full "load" often
+      // exceeds 15s. Use domcontentloaded + a usability probe instead.
+      const timeoutMs = query.timeoutMs ?? 45_000;
 
       logger.info(
         { requestId: req.requestId, targetUrl, timeoutMs },
@@ -68,12 +70,20 @@ diagnosticsRouter.get(
       const startedAt = Date.now();
       const result = await withContext(async (ctx) => {
         const page = await ctx.newPage();
-        // "load" fires after the main document + subresources; good enough
-        // to prove the browser rendered a real page.
+        // Don't wait for every subresource. DOMContentLoaded is enough to
+        // prove the browser reached the page; then confirm usability by
+        // waiting for either <body> or the search input.
         const response = await page.goto(targetUrl, {
-          waitUntil: "load",
+          waitUntil: "domcontentloaded",
           timeout: timeoutMs,
         });
+        await Promise.race([
+          page.locator("body").first().waitFor({ state: "attached", timeout: timeoutMs }),
+          page
+            .locator('input[name="keywords"], input.mod-searchbar-input, input#alisearch-input')
+            .first()
+            .waitFor({ state: "visible", timeout: timeoutMs }),
+        ]).catch(() => {});
         const title = await page.title();
         const finalUrl = page.url();
         const status = response?.status() ?? 0;
