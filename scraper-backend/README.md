@@ -63,14 +63,23 @@ scraper-backend/
     │   ├── v1.ts                # /v1 router
     │   ├── health.ts            # /v1/health
     │   └── diagnostics.ts       # /v1/diagnostics/browser (Playwright probe)
-    ├── middleware/
-    │   ├── auth.ts             # Bearer / X-API-Key
-    │   ├── error.ts            # Central error + 404 handlers
-    │   ├── rate-limit.ts       # Global + per-endpoint buckets
-    │   └── request-context.ts  # X-Request-Id propagation
-    ├── routes/
-    │   ├── v1.ts               # /v1 router
-    │   └── health.ts           # /v1/health
+    └── providers/
+        └── sourcing1688/
+            └── routes.ts        # /v1/1688/* (501 today)
+```
+
+## Local development
+
+```bash
+cp .env.example .env
+# Edit API_KEYS at minimum.
+
+npm install
+# One-time: download Chromium into the local Playwright cache.
+npx playwright install chromium
+
+npm run dev
+```
     └── providers/
         └── sourcing1688/
             └── routes.ts       # /v1/1688/* (501 today)
