@@ -2,23 +2,20 @@
 
 # -----------------------------------------------------------------------------
 # Scraper Backend — Dockerfile
-# Ubuntu 24.04 compatible. Ready for Playwright (browsers installed in Phase 4).
+# Playwright-ready. Base image is Microsoft's official Playwright image on
+# Ubuntu 24.04 (Noble), which ships Chromium + all system libs preinstalled.
 # Multi-stage: (1) install deps + build TS, (2) minimal runtime image.
 # -----------------------------------------------------------------------------
 
-ARG NODE_VERSION=20.14.0
+# Pin Playwright version — MUST match the "playwright" version in package.json.
+ARG PLAYWRIGHT_VERSION=v1.47.2
 
 ########################
 # Stage 1 — build
 ########################
-FROM node:${NODE_VERSION}-bookworm-slim AS build
+FROM mcr.microsoft.com/playwright:${PLAYWRIGHT_VERSION}-noble AS build
 
 WORKDIR /app
-
-# Install build essentials only for the build stage
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -32,34 +29,32 @@ RUN npm run build \
 ########################
 # Stage 2 — runtime
 ########################
-FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+FROM mcr.microsoft.com/playwright:${PLAYWRIGHT_VERSION}-noble AS runtime
 
 ENV NODE_ENV=production \
     PORT=8080 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    # Use the browsers already baked into the base image.
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# System deps kept minimal here. When Playwright lands (Phase 4), swap this
-# base for `mcr.microsoft.com/playwright:v1.<ver>-noble` (Ubuntu 24.04 Noble)
-# or install browser dependencies via `npx playwright install --with-deps`.
+# tini for correct signal forwarding + curl for HEALTHCHECK.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tini curl \
-    && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends tini curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
-# Non-root user
-RUN groupadd --system --gid 1001 app \
- && useradd --system --uid 1001 --gid app --home /home/app --create-home app
-
+# The playwright base image ships a `pwuser` non-root user (uid 1001).
+# Reuse it instead of creating our own.
 WORKDIR /app
 
-COPY --from=build --chown=app:app /app/node_modules ./node_modules
-COPY --from=build --chown=app:app /app/dist ./dist
-COPY --chown=app:app package.json ./
+COPY --from=build --chown=pwuser:pwuser /app/node_modules ./node_modules
+COPY --from=build --chown=pwuser:pwuser /app/dist ./dist
+COPY --chown=pwuser:pwuser package.json ./
 
-USER app
+USER pwuser
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/v1/health" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

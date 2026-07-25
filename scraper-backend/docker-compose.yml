@@ -15,14 +15,18 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 10s
-    read_only: true
+      start_period: 15s
+    # Chromium needs a writable /tmp and /dev/shm. We give it a large tmpfs
+    # for /dev/shm instead of relying on Docker's default 64MB, which is
+    # too small and causes tabs to crash on complex pages.
+    shm_size: "1gb"
     tmpfs:
       - /tmp
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # Chromium's own sandbox is disabled inside the container (see
+    # src/lib/browser.ts). Do NOT add cap_drop:[ALL] here — it prevents the
+    # renderer processes from starting under Ubuntu 24.04.
     logging:
       driver: json-file
       options:
