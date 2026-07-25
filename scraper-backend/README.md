@@ -23,6 +23,7 @@ repo root.
 | Method | Path                                    | Status                |
 |--------|-----------------------------------------|-----------------------|
 | GET    | `/v1/health`                            | 200 (public)          |
+| GET    | `/v1/diagnostics/browser`               | 200 (Playwright probe)|
 | GET    | `/v1/1688/search`                       | 501 not_implemented   |
 | GET    | `/v1/1688/product/:id`                  | 501 not_implemented   |
 | GET    | `/v1/1688/product/:id/variants`         | 501 not_implemented   |
@@ -49,9 +50,19 @@ scraper-backend/
     ├── config/
     │   └── env.ts              # Zod-validated environment
     ├── lib/
-    │   ├── logger.ts           # Pino
-    │   ├── response.ts         # Success / error envelope helpers
-    │   └── http-error.ts       # Typed error class
+    │   ├── browser.ts           # Playwright Chromium singleton
+    │   ├── logger.ts            # Pino
+    │   ├── response.ts          # Success / error envelope helpers
+    │   └── http-error.ts        # Typed error class
+    ├── middleware/
+    │   ├── auth.ts              # Bearer / X-API-Key
+    │   ├── error.ts             # Central error + 404 handlers
+    │   ├── rate-limit.ts        # Global + per-endpoint buckets
+    │   └── request-context.ts   # X-Request-Id propagation
+    ├── routes/
+    │   ├── v1.ts                # /v1 router
+    │   ├── health.ts            # /v1/health
+    │   └── diagnostics.ts       # /v1/diagnostics/browser (Playwright probe)
     ├── middleware/
     │   ├── auth.ts             # Bearer / X-API-Key
     │   ├── error.ts            # Central error + 404 handlers
