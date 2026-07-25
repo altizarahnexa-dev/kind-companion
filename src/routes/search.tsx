@@ -17,11 +17,11 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/search")({
   validateSearch: searchSchema,
-  head: ({ search }) => ({
+  head: () => ({
     meta: [
-      { title: search.q ? `${search.q} — Sourcely search` : "Search products — Sourcely" },
-      { name: "description", content: "Search the global sourcing catalogue." },
-      { property: "og:title", content: search.q ? `${search.q} — Sourcely` : "Search products — Sourcely" },
+      { title: "Search products — Sourcely" },
+      { name: "description", content: "Search the global sourcing catalogue for millions of products from verified suppliers." },
+      { property: "og:title", content: "Search products — Sourcely" },
       { property: "og:description", content: "Search millions of products from verified suppliers." },
     ],
   }),
