@@ -9,10 +9,38 @@ import { env } from "../config/env.js";
  * Diagnostics routes — used to verify Playwright works end-to-end in the
  * deployed container. NOT part of the sourcing contract (SCRAPER_BACKEND_SPEC).
  *
- * Phase 4.1: only /v1/diagnostics/browser exists. It proves the browser
- * can launch, load 1688's homepage, and read a title. No parsing, no
- * product extraction, no search.
+ * Phase 4.1: /v1/diagnostics/browser — proves Chromium can load a page.
+ * Phase 4.2: /v1/diagnostics/search  — proves Chromium can drive the
+ *   1688 search form and land on the results page. No HTML extraction,
+ *   no parsing, no persistence.
  */
+
+/** Map a Playwright error to the spec error envelope. */
+function mapPlaywrightError(err: unknown): unknown {
+  const e = err as { name?: string; message?: string };
+  if (e?.name === "TimeoutError") {
+    return new HttpError({
+      status: 504,
+      code: "upstream_timeout",
+      message: "Browser timed out while navigating.",
+      retryable: true,
+      details: { cause: e.message },
+    });
+  }
+  if (
+    e?.message?.includes("net::ERR_") ||
+    e?.message?.includes("NS_ERROR_")
+  ) {
+    return new HttpError({
+      status: 502,
+      code: "upstream_unavailable",
+      message: "Browser could not reach the target URL.",
+      retryable: true,
+      details: { cause: e.message },
+    });
+  }
+  return err;
+}
 
 const QuerySchema = z.object({
   url: z.string().url().optional(),
