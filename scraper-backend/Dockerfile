@@ -8,7 +8,7 @@
 # -----------------------------------------------------------------------------
 
 # Pin Playwright version — MUST match the "playwright" version in package.json.
-ARG PLAYWRIGHT_VERSION=v1.47.2
+ARG PLAYWRIGHT_VERSION=v1.62.0
 
 ########################
 # Stage 1 — build
