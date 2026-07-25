@@ -74,7 +74,7 @@ function SearchPage() {
           </Select>
         </div>
 
-        <ProductGrid products={products} loading={query.isLoading} />
+        {!query.isError && <ProductGrid products={products} loading={query.isLoading} />}
 
         {query.isError && products.length === 0 && (
           <Alert variant="destructive" className="mt-6">
@@ -101,7 +101,7 @@ function SearchPage() {
         {!query.hasNextPage && products.length > 0 && (
           <p className="py-6 text-center text-sm text-muted-foreground">End of results</p>
         )}
-        {products.length === 0 && !query.isLoading && (
+        {products.length === 0 && !query.isLoading && !query.isError && (
           <div className="py-16 text-center">
             <p className="text-muted-foreground">No products yet. Connect a sourcing provider to populate the catalogue.</p>
             <Button asChild variant="link"><a href="/">Back home</a></Button>
