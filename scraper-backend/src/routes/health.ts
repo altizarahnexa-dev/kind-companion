@@ -16,7 +16,7 @@ healthRouter.get("/health", (_req, res) => {
     version: process.env.npm_package_version ?? "1.0.0",
     uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
     providers: {
-      "1688":       { enabled: true,  healthy: true,  implemented: false },
+      "1688":       { enabled: true,  healthy: true,  implemented: true  },
       alibaba:      { enabled: false, healthy: false, implemented: false },
       taobao:       { enabled: false, healthy: false, implemented: false },
       aliexpress:   { enabled: false, healthy: false, implemented: false },
