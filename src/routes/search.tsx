@@ -57,7 +57,7 @@ function SearchPage() {
           </h1>
           <Select
             value={sort ?? "relevance"}
-            onValueChange={(v) => navigate({ to: "/search", search: (s) => ({ ...s, sort: v as any }) })}
+            onValueChange={(v) => navigate({ to: "/search", search: (s: z.infer<typeof searchSchema>) => ({ ...s, sort: v as z.infer<typeof searchSchema>["sort"] }) })}
           >
             <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
             <SelectContent>
