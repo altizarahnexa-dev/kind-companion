@@ -152,16 +152,33 @@ const SearchQuerySchema = z.object({
 const HOMEPAGE_URL = "https://www.1688.com";
 
 /**
+ * Build the canonical 1688 search results URL. Going straight to
+ * s.1688.com sidesteps homepage A/B tests, login walls, and Taobao
+ * redirects — all of which broke the "type into homepage input" flow.
+ */
+function buildDirectSearchUrl(keyword: string): string {
+  const params = new URLSearchParams({ keywords: keyword });
+  return `https://s.1688.com/selloffer/offer_search.htm?${params.toString()}`;
+}
+
+/**
  * Candidate selectors for 1688's homepage search input. 1688 A/Bs their
  * homepage frequently, so we try a handful and use the first visible match.
- * Order = specificity, most specific first.
+ * Order = specificity, most specific first. Kept as a fallback only —
+ * the primary path goes directly to s.1688.com.
  */
 const SEARCH_INPUT_SELECTORS = [
   'input[name="keywords"]',
   'input.mod-searchbar-input',
   'input#alisearch-input',
+  'input#home-header-searchbox-input',
+  'input[data-spm-anchor-id*="search"]',
   'input[placeholder*="搜"]',
+  'input[placeholder*="search" i]',
   '#home-header input[type="text"]',
+  '#header input[type="search"]',
+  'form[action*="s.1688.com"] input[type="text"]',
+  'textarea[name="keywords"]',
 ];
 
 /**
@@ -171,9 +188,10 @@ const SEARCH_INPUT_SELECTORS = [
 const RESULTS_URL_PATTERN = /(s\.1688\.com|offer_search|\/selloffer\/)/i;
 
 /**
- * Shared search-navigation helper. Loads the 1688 homepage, submits the
- * keyword, and waits until the results page URL is reached and the page
- * has finished loading. Throws HttpError on unrecoverable problems.
+ * Shared search-navigation helper. Prefers a direct navigation to the
+ * s.1688.com results URL because it survives homepage A/B changes and
+ * Taobao login redirects. If direct navigation lands somewhere unexpected
+ * (login wall, homepage bounce), fall back to submitting the homepage form.
  *
  * Kept here so Phase 4.2 (`/search`) and Phase 4.3 (`/search-extract`)
  * behave identically — navigation is not duplicated between routes.
@@ -183,18 +201,39 @@ async function navigateToSearchResults(
   keyword: string,
   timeoutMs: number,
 ): Promise<void> {
-  // 1. Load the homepage.
+  // --- Path A: direct URL ---------------------------------------------------
+  const directUrl = buildDirectSearchUrl(keyword);
+  try {
+    await page.goto(directUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
+    });
+    // 1688 sometimes bounces through a login page even for the direct URL.
+    // Wait briefly for the URL to settle on the results host.
+    await page
+      .waitForURL(RESULTS_URL_PATTERN, { timeout: 8_000 })
+      .catch(() => {});
+    if (RESULTS_URL_PATTERN.test(page.url())) {
+      await page
+        .waitForLoadState("networkidle", { timeout: timeoutMs })
+        .catch(() => page.waitForLoadState("load", { timeout: timeoutMs }).catch(() => {}));
+      return;
+    }
+  } catch {
+    // fall through to homepage form
+  }
+
+  // --- Path B: homepage form fallback --------------------------------------
   await page.goto(HOMEPAGE_URL, {
     waitUntil: "domcontentloaded",
     timeout: timeoutMs,
   });
 
-  // 2. Find the first visible search input.
   let filled = false;
   for (const selector of SEARCH_INPUT_SELECTORS) {
     const input = page.locator(selector).first();
     try {
-      await input.waitFor({ state: "visible", timeout: 3_000 });
+      await input.waitFor({ state: "visible", timeout: 2_500 });
       await input.fill(keyword);
       filled = true;
       break;
@@ -202,27 +241,41 @@ async function navigateToSearchResults(
       // try next selector
     }
   }
+
   if (!filled) {
-    throw new HttpError({
-      status: 502,
-      code: "upstream_unavailable",
-      message:
-        "Search input not found on 1688 homepage. Selectors may be stale.",
-      retryable: true,
+    // Last resort: navigate directly again and accept whatever page we get,
+    // as long as the URL matches the results pattern. This keeps the
+    // diagnostic useful even when the homepage is behind a login wall.
+    await page.goto(directUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
     });
+    if (!RESULTS_URL_PATTERN.test(page.url())) {
+      throw new HttpError({
+        status: 502,
+        code: "upstream_unavailable",
+        message:
+          "Search input not found on 1688 homepage and direct search URL was redirected. Selectors may be stale or 1688 is showing a login wall.",
+        retryable: true,
+        details: { finalUrl: page.url() },
+      });
+    }
+    await page
+      .waitForLoadState("networkidle", { timeout: timeoutMs })
+      .catch(() => page.waitForLoadState("load", { timeout: timeoutMs }).catch(() => {}));
+    return;
   }
 
-  // 3. Submit and wait for the results URL.
   await Promise.all([
     page.waitForURL(RESULTS_URL_PATTERN, { timeout: timeoutMs }),
     page.keyboard.press("Enter"),
   ]);
 
-  // 4. Wait until the results page is fully loaded.
   await page
     .waitForLoadState("networkidle", { timeout: timeoutMs })
-    .catch(() => page.waitForLoadState("load", { timeout: timeoutMs }));
+    .catch(() => page.waitForLoadState("load", { timeout: timeoutMs }).catch(() => {}));
 }
+
 
 diagnosticsRouter.get(
   "/search",
