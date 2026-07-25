@@ -19,8 +19,11 @@ export const logger = pino({
     ],
     censor: "[redacted]",
   },
+  // pino-pretty is a devDependency and is pruned from the production image.
+  // Only enable it when explicitly requested AND running in development,
+  // so `npm prune --omit=dev` cannot break boot.
   transport:
-    env.LOG_PRETTY && env.NODE_ENV !== "production"
+    env.NODE_ENV === "development" && env.LOG_PRETTY
       ? {
           target: "pino-pretty",
           options: { colorize: true, translateTime: "SYS:standard" },
