@@ -245,7 +245,7 @@ export async function searchProducts1688(
       message:
         err?.message ??
         `Scraper backend returned HTTP ${response.status}.`,
-      retryable: err?.retryable ?? response.status >= 500 || response.status === 429,
+      retryable: err?.retryable ?? (response.status >= 500 || response.status === 429),
       retryAfterMs: err?.retryAfterMs,
     });
   }
