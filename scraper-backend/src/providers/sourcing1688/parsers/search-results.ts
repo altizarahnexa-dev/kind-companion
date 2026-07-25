@@ -90,7 +90,19 @@ export async function extractSearchResults(
   limit = 10,
 ): Promise<SearchResultProduct[]> {
   return page.evaluate(
-    ({ containers, fields, offerIdSrc, cap }) => {
+    (args: {
+      containers: string[];
+      fields: {
+        link: string[];
+        title: string[];
+        thumbnail: string[];
+        price: string[];
+        supplier: string[];
+      };
+      offerIdSrc: string;
+      cap: number;
+    }) => {
+      const { containers, fields, offerIdSrc, cap } = args;
       const OFFER_ID = new RegExp(offerIdSrc, "i");
 
       const text = (el: Element | null | undefined): string =>
