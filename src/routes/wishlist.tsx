@@ -14,6 +14,8 @@ export const Route = createFileRoute("/wishlist")({
       { name: "description", content: "Products you've saved for later." },
       { property: "og:title", content: "Wishlist — Sourcely" },
       { property: "og:description", content: "Products you've saved for later." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),

@@ -12,6 +12,8 @@ export const Route = createFileRoute("/categories")({
       { name: "description", content: "Browse every category on Sourcely — from apparel to electronics to industrial equipment." },
       { property: "og:title", content: "All categories — Sourcely" },
       { property: "og:description", content: "Browse every category on Sourcely." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: CategoriesPage,

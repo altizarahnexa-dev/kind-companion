@@ -20,6 +20,8 @@ export const Route = createFileRoute("/account")({
       { name: "description", content: "Manage your Sourcely profile and preferences." },
       { property: "og:title", content: "Account — Sourcely" },
       { property: "og:description", content: "Manage your Sourcely profile and preferences." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),

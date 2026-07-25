@@ -17,6 +17,8 @@ export const Route = createFileRoute("/cart")({
       { name: "description", content: "Review the items in your Sourcely cart before checkout." },
       { property: "og:title", content: "Your cart — Sourcely" },
       { property: "og:description", content: "Review the items in your Sourcely cart before checkout." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),

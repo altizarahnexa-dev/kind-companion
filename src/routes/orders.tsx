@@ -16,6 +16,8 @@ export const Route = createFileRoute("/orders")({
       { name: "description", content: "Track your Sourcely orders." },
       { property: "og:title", content: "Your orders — Sourcely" },
       { property: "og:description", content: "Track your Sourcely orders." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),

@@ -14,6 +14,8 @@ export const Route = createFileRoute("/supplier/$id")({
       { name: "description", content: "Supplier profile and full product catalogue." },
       { property: "og:title", content: "Supplier — Sourcely" },
       { property: "og:description", content: "Supplier profile and full product catalogue." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: SupplierPage,

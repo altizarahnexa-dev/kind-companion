@@ -21,6 +21,8 @@ export const Route = createFileRoute("/product/$id")({
       { name: "description", content: `Product details on Sourcely.` },
       { property: "og:title", content: `Product — Sourcely` },
       { property: "og:description", content: `Product details on Sourcely.` },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: ProductPage,
