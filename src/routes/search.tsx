@@ -44,7 +44,9 @@ function SearchPage() {
 
   const products = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
-  const errorMessage = query.error instanceof Error ? query.error.message : "The active sourcing provider is unavailable.";
+  const providerError = query.data?.pages.find((page) => page.error)?.error;
+  const errorMessage = providerError?.message ?? (query.error instanceof Error ? query.error.message : "The active sourcing provider is unavailable.");
+  const hasProviderError = Boolean(providerError) || query.isError;
 
   const sentinelRef = useInfiniteScroll(
     () => { if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage(); },
@@ -74,9 +76,9 @@ function SearchPage() {
           </Select>
         </div>
 
-        {!query.isError && <ProductGrid products={products} loading={query.isLoading} />}
+        {!hasProviderError && <ProductGrid products={products} loading={query.isLoading} />}
 
-        {query.isError && products.length === 0 && (
+        {hasProviderError && products.length === 0 && (
           <Alert variant="destructive" className="mt-6">
             <AlertTitle>Search provider unavailable</AlertTitle>
             <AlertDescription>
@@ -101,7 +103,7 @@ function SearchPage() {
         {!query.hasNextPage && products.length > 0 && (
           <p className="py-6 text-center text-sm text-muted-foreground">End of results</p>
         )}
-        {products.length === 0 && !query.isLoading && !query.isError && (
+        {products.length === 0 && !query.isLoading && !hasProviderError && (
           <div className="py-16 text-center">
             <p className="text-muted-foreground">No products yet. Connect a sourcing provider to populate the catalogue.</p>
             <Button asChild variant="link"><a href="/">Back home</a></Button>

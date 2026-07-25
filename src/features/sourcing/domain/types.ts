@@ -100,6 +100,13 @@ export interface Page<T> {
   pageSize: number;
   total: number;
   hasMore: boolean;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    status?: number;
+    retryAfterMs?: number;
+  };
 }
 
 export interface SearchRequest extends SearchFilters {
