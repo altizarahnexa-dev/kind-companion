@@ -15,6 +15,7 @@ import {
 import { extractSearchResults } from "./parsers/search-results.js";
 import { extractProductDetail } from "./parsers/product-detail.js";
 import { extractProductVariants } from "./parsers/product-variants.js";
+import { captureParseFailure } from "../../lib/debug-capture.js";
 
 /**
  * 1688 provider routes — the sourcing contract endpoints.
@@ -169,21 +170,34 @@ sourcing1688Router.get(
             sort: query.sort,
             timeoutMs,
           });
-          return await extractSearchResults(page, query.pageSize);
+          const results = await extractSearchResults(page, query.pageSize);
+          if (results.length === 0) {
+            const capture = await captureParseFailure(page, {
+              requestId: req.requestId,
+              phase: "parse",
+              label: keyword,
+            });
+            throw new HttpError({
+              status: 502,
+              code: "parse_failed",
+              message: "Could not extract any products from the 1688 results page.",
+              retryable: true,
+              details: {
+                phase: "parse",
+                url: capture.url,
+                title: capture.title,
+                screenshot: capture.screenshot,
+                html: capture.html,
+                signals: capture.signals,
+              },
+            });
+          }
+          return results;
         } finally {
           await page.close().catch(() => {});
         }
       });
 
-      if (raw.length === 0) {
-        throw new HttpError({
-          status: 502,
-          code: "parse_failed",
-          message: "Could not extract any products from the 1688 results page.",
-          retryable: true,
-          details: { phase: "parse" },
-        });
-      }
 
       // Optional client-side filter for verifiedOnly / price bounds. We
       // do NOT drop items for missing price — 1688 hides some prices
