@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { ProductGrid } from "@/components/product/product-grid";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
@@ -23,6 +24,8 @@ export const Route = createFileRoute("/search")({
       { name: "description", content: "Search the global sourcing catalogue for millions of products from verified suppliers." },
       { property: "og:title", content: "Search products — Sourcely" },
       { property: "og:description", content: "Search millions of products from verified suppliers." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: SearchPage,
@@ -41,6 +44,7 @@ function SearchPage() {
 
   const products = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
+  const errorMessage = query.error instanceof Error ? query.error.message : "The active sourcing provider is unavailable.";
 
   const sentinelRef = useInfiniteScroll(
     () => { if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage(); },
@@ -70,7 +74,25 @@ function SearchPage() {
           </Select>
         </div>
 
-        <ProductGrid products={products} loading={query.isLoading} />
+        {!query.isError && <ProductGrid products={products} loading={query.isLoading} />}
+
+        {query.isError && products.length === 0 && (
+          <Alert variant="destructive" className="mt-6">
+            <AlertTitle>Search provider unavailable</AlertTitle>
+            <AlertDescription>
+              <p>{errorMessage}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => void query.refetch()}
+              >
+                Retry search
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div ref={sentinelRef} className="h-16" aria-hidden />
         {query.isFetchingNextPage && (
@@ -79,7 +101,7 @@ function SearchPage() {
         {!query.hasNextPage && products.length > 0 && (
           <p className="py-6 text-center text-sm text-muted-foreground">End of results</p>
         )}
-        {products.length === 0 && !query.isLoading && (
+        {products.length === 0 && !query.isLoading && !query.isError && (
           <div className="py-16 text-center">
             <p className="text-muted-foreground">No products yet. Connect a sourcing provider to populate the catalogue.</p>
             <Button asChild variant="link"><a href="/">Back home</a></Button>

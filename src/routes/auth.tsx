@@ -17,6 +17,8 @@ export const Route = createFileRoute("/auth")({
       { name: "description", content: "Access your Sourcely account to buy from verified global suppliers." },
       { property: "og:title", content: "Sign in — Sourcely" },
       { property: "og:description", content: "Access your Sourcely account." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),

@@ -124,6 +124,8 @@ function mapStatusToCode(status: number, fallback = "upstream_error"): string {
       return "validation_error";
     case 429:
       return "rate_limited";
+    case 501:
+      return "backend_provider_not_implemented";
     case 502:
       return "upstream_unavailable";
     case 504:
@@ -201,7 +203,7 @@ export async function searchProducts1688(
   const requestId = randomUUID();
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const timeout = setTimeout(() => controller.abort(), 8_000);
 
   let response: Response;
   try {
@@ -239,12 +241,15 @@ export async function searchProducts1688(
 
   if (!response.ok || !parsed || parsed.ok === false) {
     const err = (parsed as BackendError | undefined)?.error;
+    const upstreamCode = err?.code ?? mapStatusToCode(response.status);
+    const upstreamMessage =
+      response.status === 501 || err?.code === "not_implemented"
+        ? "The configured scraper backend still returns 501 Not Implemented for 1688 search. Deploy the current scraper-backend build on the VPS so /v1/1688/search uses the Playwright implementation."
+        : err?.message ?? `Scraper backend returned HTTP ${response.status}.`;
     throw new SourcingBackendError({
       status: response.status || 502,
-      code: err?.code ?? mapStatusToCode(response.status),
-      message:
-        err?.message ??
-        `Scraper backend returned HTTP ${response.status}.`,
+      code: upstreamCode,
+      message: upstreamMessage,
       retryable: err?.retryable ?? (response.status >= 500 || response.status === 429),
       retryAfterMs: err?.retryAfterMs,
     });

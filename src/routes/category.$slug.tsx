@@ -14,6 +14,8 @@ export const Route = createFileRoute("/category/$slug")({
       { name: "description", content: `Browse ${params.slug} products from verified global suppliers.` },
       { property: "og:title", content: `${params.slug} — Sourcely` },
       { property: "og:description", content: `Browse ${params.slug} products from verified global suppliers.` },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: CategoryPage,
