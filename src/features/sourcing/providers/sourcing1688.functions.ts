@@ -11,22 +11,8 @@ import type { Page, ProductSummary, SearchRequest } from "../domain/types";
 export const searchProducts1688Fn = createServerFn({ method: "GET" })
   .inputValidator((input: SearchRequest): SearchRequest => input ?? {})
   .handler(async ({ data }): Promise<Page<ProductSummary>> => {
-    const { searchProducts1688, SourcingBackendError } = await import(
+    const { searchProducts1688Safe } = await import(
       "./sourcing1688.server"
     );
-    try {
-      return await searchProducts1688(data);
-    } catch (err) {
-      if (err instanceof SourcingBackendError) {
-        // Re-throw as a plain Error carrying the code so the RPC boundary
-        // preserves the message. The client SourcingProvider maps this to
-        // its domain-level error surface.
-        const wrapped = new Error(err.message);
-        (wrapped as Error & { code?: string; status?: number; retryable?: boolean }).code = err.code;
-        (wrapped as Error & { code?: string; status?: number; retryable?: boolean }).status = err.status;
-        (wrapped as Error & { code?: string; status?: number; retryable?: boolean }).retryable = err.retryable;
-        throw wrapped;
-      }
-      throw err;
-    }
+    return searchProducts1688Safe(data);
   });

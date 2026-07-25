@@ -263,3 +263,42 @@ export async function searchProducts1688(
 
   return { items, page, pageSize, total: total ?? 0, hasMore };
 }
+
+export async function searchProducts1688Safe(
+  req: SearchRequest,
+): Promise<Page<ProductSummary>> {
+  try {
+    return await searchProducts1688(req);
+  } catch (err) {
+    if (err instanceof SourcingBackendError) {
+      return {
+        items: [],
+        page: req.page ?? 1,
+        pageSize: req.pageSize ?? 24,
+        total: 0,
+        hasMore: false,
+        error: {
+          code: err.code,
+          message: err.message,
+          retryable: err.retryable,
+          status: err.status,
+          retryAfterMs: err.retryAfterMs,
+        },
+      };
+    }
+
+    return {
+      items: [],
+      page: req.page ?? 1,
+      pageSize: req.pageSize ?? 24,
+      total: 0,
+      hasMore: false,
+      error: {
+        code: "provider_error",
+        message: "The active sourcing provider is unavailable.",
+        retryable: true,
+        status: 502,
+      },
+    };
+  }
+}
