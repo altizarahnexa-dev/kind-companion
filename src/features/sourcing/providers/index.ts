@@ -27,7 +27,7 @@ export const PROVIDERS: Record<ProviderCode, SourcingProvider> = {
 const ENV_PROVIDER =
   (import.meta.env.VITE_SOURCING_PROVIDER as ProviderCode | undefined) ?? undefined;
 
-export const ACTIVE_PROVIDER: ProviderCode = ENV_PROVIDER ?? "internal";
+export const ACTIVE_PROVIDER: ProviderCode = ENV_PROVIDER ?? "sourcing_1688";
 
 export function getProvider(code: ProviderCode = ACTIVE_PROVIDER): SourcingProvider {
   return PROVIDERS[code] ?? internalProvider;
