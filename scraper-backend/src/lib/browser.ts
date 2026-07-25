@@ -1,98 +1,166 @@
-import { chromium, type Browser, type BrowserContext, type LaunchOptions } from "playwright";
+import { chromium, type BrowserContext } from "playwright";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { env } from "../config/env.js";
 import { logger } from "./logger.js";
 
 /**
- * Browser singleton. One Chromium instance is shared across requests; each
- * request gets its own isolated BrowserContext (cookies, storage) via
- * `withContext()`. This is the standard pattern for a Playwright server —
- * launching per request would cost 500ms+ every call.
+ * Authenticated persistent browsing.
  *
- * Phase 4.1: infrastructure only. Higher-level scraping code will call
- * `withContext()` in later phases.
+ * We run ONE Chromium `launchPersistentContext` for the whole process. Its
+ * `userDataDir` lives on a Docker volume, so cookies survive restarts. On
+ * startup we additionally merge any storageState JSON at `AUTH_STATE_PATH`
+ * into the context — that's the file the /v1/auth/1688/cookies endpoints
+ * export/import so operators can seed a signed-in session.
+ *
+ * Each request calls `withContext(fn)` and opens its own `page` from the
+ * shared context. Cookies are intentionally shared across requests — that
+ * is the whole point of persistent auth.
  */
 
-let browserPromise: Promise<Browser> | null = null;
+const AUTH_COOKIE_HOSTS = [".1688.com", ".taobao.com", ".alibaba.com"];
+const AUTH_COOKIE_NAMES = /^(login_aid|_tb_token_|cookie2|unb|sg|csg|_l_g_|tracknick|_nk_)/i;
 
-function buildLaunchOptions(): LaunchOptions {
-  const opts: LaunchOptions = {
+let contextPromise: Promise<BrowserContext> | null = null;
+
+export function userDataDir(): string {
+  return process.env.USER_DATA_DIR?.trim() || "/data/userdata";
+}
+
+export function authStatePath(): string {
+  return process.env.AUTH_STATE_PATH?.trim() || "/data/1688-state.json";
+}
+
+async function launch(): Promise<BrowserContext> {
+  const dir = userDataDir();
+  await mkdir(dir, { recursive: true });
+  const statePath = authStatePath();
+  const hasState = existsSync(statePath);
+
+  logger.info(
+    { userDataDir: dir, statePath, hasState, headless: env.PLAYWRIGHT_HEADLESS },
+    "launching persistent Chromium context",
+  );
+
+  const ctx = await chromium.launchPersistentContext(dir, {
     headless: env.PLAYWRIGHT_HEADLESS,
-    // These flags are the canonical set for running Chromium inside a
-    // constrained Linux container. Without them Chromium refuses to start
-    // as an unprivileged user in Docker.
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
     ],
-  };
-  if (env.PLAYWRIGHT_PROXY_URL) {
-    opts.proxy = { server: env.PLAYWRIGHT_PROXY_URL };
-  }
-  return opts;
-}
-
-async function launch(): Promise<Browser> {
-  logger.info(
-    { headless: env.PLAYWRIGHT_HEADLESS, browser: env.PLAYWRIGHT_BROWSER },
-    "launching Playwright browser",
-  );
-  const browser = await chromium.launch(buildLaunchOptions());
-  browser.on("disconnected", () => {
-    logger.warn("Playwright browser disconnected");
-    browserPromise = null;
-  });
-  return browser;
-}
-
-/**
- * Lazy singleton. First call launches Chromium; subsequent calls reuse it.
- * If the browser has disconnected, the next call re-launches.
- */
-export function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = launch().catch((err) => {
-      browserPromise = null;
-      throw err;
-    });
-  }
-  return browserPromise;
-}
-
-/**
- * Run `fn` inside a fresh isolated BrowserContext. The context is always
- * closed, even on error. Callers get automatic isolation between requests.
- */
-export async function withContext<T>(
-  fn: (ctx: BrowserContext) => Promise<T>,
-  contextOptions?: Parameters<Browser["newContext"]>[0],
-): Promise<T> {
-  const browser = await getBrowser();
-  const ctx = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     locale: "en-US",
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    ...contextOptions,
+    proxy: env.PLAYWRIGHT_PROXY_URL ? { server: env.PLAYWRIGHT_PROXY_URL } : undefined,
   });
-  try {
-    return await fn(ctx);
-  } finally {
-    await ctx.close().catch(() => {});
+
+  // Seed cookies from disk (in addition to userDataDir persistence).
+  if (hasState) {
+    try {
+      const raw = await readFile(statePath, "utf8");
+      const parsed = JSON.parse(raw) as {
+        cookies?: Parameters<BrowserContext["addCookies"]>[0];
+      };
+      if (parsed.cookies?.length) {
+        await ctx.addCookies(parsed.cookies);
+        logger.info({ count: parsed.cookies.length }, "loaded cookies from state file");
+      }
+    } catch (err) {
+      logger.warn({ err, statePath }, "failed to load storage state file");
+    }
   }
+
+  ctx.on("close", () => {
+    logger.warn("Playwright persistent context closed");
+    contextPromise = null;
+  });
+
+  return ctx;
+}
+
+/** Lazy singleton. First call launches Chromium; later calls reuse it. */
+export function getContext(): Promise<BrowserContext> {
+  if (!contextPromise) {
+    contextPromise = launch().catch((err) => {
+      contextPromise = null;
+      throw err;
+    });
+  }
+  return contextPromise;
+}
+
+/**
+ * Run `fn` with the shared persistent context. Each caller opens its own
+ * `page` and closes it — the context itself is long-lived.
+ */
+export async function withContext<T>(
+  fn: (ctx: BrowserContext) => Promise<T>,
+): Promise<T> {
+  const ctx = await getContext();
+  return fn(ctx);
 }
 
 /** Graceful shutdown hook — called from server.ts. */
 export async function closeBrowser(): Promise<void> {
-  if (!browserPromise) return;
+  if (!contextPromise) return;
   try {
-    const browser = await browserPromise;
-    await browser.close();
-    logger.info("Playwright browser closed");
+    const ctx = await contextPromise;
+    await ctx.close();
+    logger.info("Playwright persistent context closed");
   } catch (err) {
-    logger.warn({ err }, "error closing Playwright browser");
+    logger.warn({ err }, "error closing Playwright context");
   } finally {
-    browserPromise = null;
+    contextPromise = null;
   }
+}
+
+/**
+ * True when the shared context has at least one cookie that looks like a
+ * signed-in session on 1688 / Taobao / Alibaba. Heuristic — good enough
+ * for the health endpoint.
+ */
+export async function isAuthenticated(): Promise<boolean> {
+  try {
+    const ctx = await getContext();
+    const cookies = await ctx.cookies();
+    return cookies.some(
+      (c) =>
+        AUTH_COOKIE_HOSTS.some((h) => c.domain.endsWith(h)) &&
+        AUTH_COOKIE_NAMES.test(c.name),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function exportStorageState(): Promise<Awaited<
+  ReturnType<BrowserContext["storageState"]>
+>> {
+  const ctx = await getContext();
+  return ctx.storageState();
+}
+
+/**
+ * Import a storageState-shaped JSON blob into the running context and
+ * persist it to `AUTH_STATE_PATH` for the next restart. Returns the count
+ * of cookies applied.
+ */
+export async function importStorageState(state: {
+  cookies?: Parameters<BrowserContext["addCookies"]>[0];
+  origins?: unknown[];
+}): Promise<{ cookies: number; path: string }> {
+  const ctx = await getContext();
+  const cookies = state.cookies ?? [];
+  if (cookies.length) {
+    await ctx.addCookies(cookies);
+  }
+  const path = authStatePath();
+  await mkdir(dirname(path), { recursive: true });
+  const merged = await ctx.storageState();
+  await writeFile(path, JSON.stringify(merged, null, 2), "utf8");
+  return { cookies: cookies.length, path };
 }
