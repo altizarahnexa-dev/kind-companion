@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../middleware/auth.js";
 import { globalLimiter } from "../middleware/rate-limit.js";
 import { healthRouter } from "./health.js";
 import { sourcing1688Router } from "../providers/sourcing1688/routes.js";
+import { diagnosticsRouter } from "./diagnostics.js";
 
 /**
  * v1 router. Mount order matters:
@@ -18,6 +19,9 @@ v1Router.use("/", healthRouter);
 // Authenticated
 v1Router.use(apiKeyAuth);
 v1Router.use(globalLimiter);
+
+// Diagnostics (Playwright infra checks — not part of the sourcing contract)
+v1Router.use("/diagnostics", diagnosticsRouter);
 
 // Providers
 v1Router.use("/1688", sourcing1688Router);
