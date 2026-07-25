@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./lib/logger.js";
+import { closeBrowser } from "./lib/browser.js";
 
 /**
  * HTTP entry point. Graceful shutdown on SIGINT / SIGTERM so Docker stops
@@ -23,11 +24,12 @@ function shutdown(signal: string) {
   }, 10_000);
   forceExit.unref();
 
-  server.close((err) => {
+  server.close(async (err) => {
     if (err) {
       logger.error({ err }, "error during shutdown");
       process.exit(1);
     }
+    await closeBrowser();
     logger.info("closed cleanly");
     process.exit(0);
   });
