@@ -227,6 +227,19 @@ async function main() {
     throw new AuthenticationFailedError("Login was not positively verified.");
   }
 
+  const preExportCookies = await context.cookies();
+  const preExportCnLogon = findCookie(preExportCookies, "_cn_logon")?.value ?? "<missing>";
+  const activePage = context.pages()[0];
+  const currentUrl = activePage ? activePage.url() : "<no-page>";
+  console.log(
+    `• Pre-export snapshot: url=${currentUrl} totalCookies=${preExportCookies.length} _cn_logon=${preExportCnLogon}`,
+  );
+  if (preExportCnLogon !== "true") {
+    throw new AuthenticationFailedError(
+      `Refusing to export: _cn_logon="${preExportCnLogon}" (expected "true"). Session is not authenticated.`,
+    );
+  }
+
   const state = await context.storageState();
   await mkdir(dirname(OUT_PATH), { recursive: true });
   await writeFile(OUT_PATH, JSON.stringify(state, null, 2), "utf8");
@@ -242,6 +255,7 @@ async function main() {
     console.log("• --keep-open set, leaving browser running. Ctrl+C to exit.");
   }
 }
+
 
 main().catch((err) => {
   if (err instanceof AuthenticationFailedError) {
