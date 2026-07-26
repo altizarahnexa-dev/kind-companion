@@ -163,6 +163,34 @@ sourcing1688Router.get(
       "1688 search: begin",
     );
 
+    // ---- Demo-mode short circuit -----------------------------------------
+    // While the live scraper is not authenticated, canned catalogues serve
+    // the "shoes" and "backpacks" verticals so the UI stays fully usable.
+    const demoCategory = detectDemoCategory(keyword);
+    if (demoCategory) {
+      try {
+        const demo = await paginateDemo(demoCategory, query.page, query.pageSize);
+        return sendSuccess(res, {
+          provider: PROVIDER,
+          requestId: req.requestId,
+          data: { items: demo.items },
+          meta: {
+            page: demo.page,
+            pageSize: demo.pageSize,
+            total: demo.total,
+            hasMore: demo.hasMore,
+            nextPage: demo.nextPage,
+            demo: true,
+            demoCategory,
+          },
+          cache: { hit: true, ageSeconds: 0, ttlSeconds: 3600 },
+        });
+      } catch (err) {
+        return next(mapPlaywrightError(err, "demo_catalog"));
+      }
+    }
+
+
     try {
       const raw = await withContext(async (ctx) => {
         const page = await ctx.newPage();
