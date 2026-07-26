@@ -154,17 +154,45 @@ export async function importStorageState(state: {
   cookies?: Parameters<BrowserContext["addCookies"]>[0];
   origins?: unknown[];
 }): Promise<{ cookies: number; path: string }> {
-  const ctx = await getContext();
-  const cookies = state.cookies ?? [];
-  if (cookies.length) {
-    await ctx.addCookies(cookies);
-  }
   const path = authStatePath();
   await mkdir(dirname(path), { recursive: true });
-  const merged = await ctx.storageState();
-  await writeFile(path, JSON.stringify(merged, null, 2), "utf8");
+
+  // 1. Persist uploaded state to disk FIRST so the next launch seeds from it.
+  await writeFile(path, JSON.stringify(state, null, 2), "utf8");
+  const incoming = state.cookies ?? [];
+  logger.info({ count: incoming.length, path }, "persisted uploaded storage state to disk");
+
+  // 2. Tear down any pre-auth shared context — its in-memory cookie jar
+  //    predates the upload. Closing forces a clean relaunch that re-seeds
+  //    cookies from AUTH_STATE_PATH via launchHeadless().
+  if (contextPromise) {
+    logger.info("closing pre-auth shared context so it is recreated with imported cookies");
+    await closeSharedContext();
+  }
+
+  // 3. Recreate now and re-apply cookies in-memory so the first request
+  //    after upload already uses the authenticated session.
+  const ctx = await getContext();
+  if (incoming.length) {
+    await ctx.addCookies(incoming);
+  }
+  await ctx.storageState({ path });
+
+  const finalCookies = await ctx.cookies();
+  const authNames = finalCookies
+    .filter(
+      (c) =>
+        AUTH_COOKIE_HOSTS.some((h) => c.domain.endsWith(h)) &&
+        AUTH_COOKIE_NAMES.test(c.name),
+    )
+    .map((c) => c.name);
+  logger.info(
+    { loaded: incoming.length, total: finalCookies.length, authCookies: authNames },
+    "browser recreated after auth upload",
+  );
+
   lastLoginAt = Date.now();
-  return { cookies: cookies.length, path };
+  return { cookies: incoming.length, path };
 }
 
 export interface SessionStatus {
