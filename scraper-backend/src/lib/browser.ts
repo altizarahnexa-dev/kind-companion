@@ -384,6 +384,20 @@ async function launchPersistentContext(): Promise<BrowserContext> {
   });
 
   try {
+    const cookiesImmediatelyAfterLaunch = await ctx.cookies();
+    logger.info(
+      {
+        storageStateCookieCount: persistedState?.cookies.length ?? 0,
+        runtimeCookieCountImmediatelyAfterLaunch: cookiesImmediatelyAfterLaunch.length,
+        runtimeAuthCookieNamesImmediatelyAfterLaunch: authCookieNames(cookiesImmediatelyAfterLaunch),
+        authenticatedCookieNamesExpected: authCookieNames(persistedState?.cookies ?? []),
+        ...(persistedState
+          ? summarizeMissingCookies(persistedState.cookies, cookiesImmediatelyAfterLaunch)
+          : { missingCount: 0, missingAuthCookieNames: [] }),
+      },
+      "cookie audit immediately after persistent context launch before explicit hydration",
+    );
+
     await hydrateRuntimeState(ctx, persistedState);
     logger.info(
       {
