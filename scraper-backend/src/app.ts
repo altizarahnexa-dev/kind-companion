@@ -44,7 +44,8 @@ export function createApp(): Express {
     }),
   );
   app.use(compression());
-  app.use(express.json({ limit: "64kb" }));
+  app.use(express.json({ limit: "25mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
   // Observability — attach requestId BEFORE the HTTP logger so it appears in logs.
   app.use(requestContext);
