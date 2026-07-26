@@ -59,6 +59,46 @@ function authCookieNames(cookies: Pick<PlaywrightCookie, "domain" | "name">[]): 
     .map((cookie) => cookie.name);
 }
 
+function cookieKey(cookie: Pick<PlaywrightCookie, "domain" | "path" | "name">): string {
+  return `${cookie.domain}|${cookie.path}|${cookie.name}`;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+function cookieNamesByHost(cookies: Pick<PlaywrightCookie, "domain" | "name">[]): Record<string, string[]> {
+  return Object.fromEntries(
+    AUTH_COOKIE_HOSTS.map((host) => [
+      host,
+      uniqueSorted(
+        cookies
+          .filter((cookie) => cookie.domain.endsWith(host))
+          .map((cookie) => cookie.name),
+      ),
+    ]),
+  );
+}
+
+function documentCookieNames(documentCookie: string): string[] {
+  return uniqueSorted(
+    documentCookie
+      .split(";")
+      .map((part) => part.trim().split("=")[0]?.trim())
+      .filter((name): name is string => Boolean(name)),
+  );
+}
+
+function summarizeMissingCookies(uploaded: PlaywrightCookie[], runtime: PlaywrightCookie[]) {
+  const runtimeKeys = new Set(runtime.map(cookieKey));
+  const missing = uploaded.filter((cookie) => !runtimeKeys.has(cookieKey(cookie)));
+  return {
+    missingCount: missing.length,
+    missingAuthCookieNames: authCookieNames(missing),
+    missingNamesByHost: cookieNamesByHost(missing),
+  };
+}
+
 function normalizeStorageItems(value: unknown): StorageItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -116,7 +156,18 @@ async function readPersistedState(path: string): Promise<PersistedStorageState |
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as { cookies?: PlaywrightCookie[]; origins?: unknown[] };
-    return normalizeStorageState(parsed);
+    const state = normalizeStorageState(parsed);
+    logger.info(
+      {
+        statePath: path,
+        storageStateCookieCount: state.cookies.length,
+        storageStateOriginCount: state.origins.length,
+        authenticatedCookieNamesExpected: authCookieNames(state.cookies),
+        storageStateCookieNamesByHost: cookieNamesByHost(state.cookies),
+      },
+      "loaded persisted 1688 storage state from AUTH_STATE_PATH",
+    );
+    return state;
   } catch (err) {
     logger.warn({ err, statePath: path }, "failed to load persisted 1688 storage state");
     return null;
@@ -124,6 +175,15 @@ async function readPersistedState(path: string): Promise<PersistedStorageState |
 }
 
 async function addCookiesExplicitly(ctx: BrowserContext, cookies: PlaywrightCookie[]): Promise<void> {
+  logger.info(
+    {
+      uploadedCookieCount: cookies.length,
+      authenticatedCookieNamesExpected: authCookieNames(cookies),
+      uploadedCookieNamesByHost: cookieNamesByHost(cookies),
+    },
+    "applying uploaded cookies explicitly to Playwright context",
+  );
+
   if (cookies.length === 0) return;
 
   try {
@@ -193,6 +253,16 @@ async function restoreOriginStorage(page: Page, origin: PersistedOrigin): Promis
       sessionStorageItems: origin.sessionStorage ?? [],
     },
   );
+
+  logger.info(
+    {
+      origin: origin.origin,
+      restoredLocalStorageItems: origin.localStorage.length,
+      restoredSessionStorageItems: origin.sessionStorage?.length ?? 0,
+      finalUrl: page.url(),
+    },
+    "restored origin storage into temporary hydration page",
+  );
 }
 
 async function reloadHydrationPage(page: Page): Promise<void> {
@@ -207,13 +277,34 @@ async function runtimeHydrationSnapshot(ctx: BrowserContext, page: Page) {
   const runtimeCookies = await ctx.cookies();
   const documentCookie = await page.evaluate(() => document.cookie).catch(() => "");
   const locationHostname = await page.evaluate(() => window.location.hostname).catch(() => "");
+  const pageUrl = page.url();
+  const pageTitle = await page.title().catch(() => "");
 
   return {
     runtimeCookieCount: runtimeCookies.length,
     authCookieNames: authCookieNames(runtimeCookies),
-    documentCookie,
+    runtimeCookieNamesByHost: cookieNamesByHost(runtimeCookies),
+    documentCookieNames: documentCookieNames(documentCookie),
     locationHostname,
+    pageUrl,
+    pageTitle,
+    redirectedToLogin: /(^|\.)login\./i.test(locationHostname) || /login\.taobao\.com/i.test(pageUrl),
   };
+}
+
+async function logPostLaunchCookieAudit(ctx: BrowserContext, state: PersistedStorageState | null): Promise<void> {
+  const runtimeCookies = await ctx.cookies();
+  logger.info(
+    {
+      storageStateCookieCount: state?.cookies.length ?? 0,
+      runtimeCookieCountAfterContextLaunch: runtimeCookies.length,
+      authenticatedCookieNamesExpected: authCookieNames(state?.cookies ?? []),
+      runtimeAuthCookieNames: authCookieNames(runtimeCookies),
+      ...(state ? summarizeMissingCookies(state.cookies, runtimeCookies) : { missingCount: 0, missingAuthCookieNames: [] }),
+      runtimeCookieNamesByHost: cookieNamesByHost(runtimeCookies),
+    },
+    "post-launch cookie audit before singleton exposure",
+  );
 }
 
 async function hydrateRuntimeState(ctx: BrowserContext, state: PersistedStorageState | null): Promise<void> {
@@ -221,6 +312,15 @@ async function hydrateRuntimeState(ctx: BrowserContext, state: PersistedStorageS
 
   try {
     if (state) {
+      logger.info(
+        {
+          storageStateCookieCount: state.cookies.length,
+          storageStateOriginCount: state.origins.length,
+          authenticatedCookieNamesExpected: authCookieNames(state.cookies),
+        },
+        "hydrating runtime context from uploaded storage state",
+      );
+
       await addCookiesExplicitly(ctx, state.cookies);
 
       for (const origin of state.origins) {
@@ -233,6 +333,8 @@ async function hydrateRuntimeState(ctx: BrowserContext, state: PersistedStorageS
     }
 
     await reloadHydrationPage(page);
+
+    await logPostLaunchCookieAudit(ctx, state);
 
     const snapshot = await runtimeHydrationSnapshot(ctx, page);
     if (state && state.cookies.length > 0 && snapshot.runtimeCookieCount === 0) {
@@ -282,7 +384,30 @@ async function launchPersistentContext(): Promise<BrowserContext> {
   });
 
   try {
+    const cookiesImmediatelyAfterLaunch = await ctx.cookies();
+    logger.info(
+      {
+        storageStateCookieCount: persistedState?.cookies.length ?? 0,
+        runtimeCookieCountImmediatelyAfterLaunch: cookiesImmediatelyAfterLaunch.length,
+        runtimeAuthCookieNamesImmediatelyAfterLaunch: authCookieNames(cookiesImmediatelyAfterLaunch),
+        authenticatedCookieNamesExpected: authCookieNames(persistedState?.cookies ?? []),
+        ...(persistedState
+          ? summarizeMissingCookies(persistedState.cookies, cookiesImmediatelyAfterLaunch)
+          : { missingCount: 0, missingAuthCookieNames: [] }),
+      },
+      "cookie audit immediately after persistent context launch before explicit hydration",
+    );
+
     await hydrateRuntimeState(ctx, persistedState);
+    logger.info(
+      {
+        userDataDir: dir,
+        statePath,
+        hasState,
+        singletonReady: true,
+      },
+      "Playwright singleton ready after explicit runtime hydration",
+    );
     return ctx;
   } catch (err) {
     await ctx.close().catch((closeErr) => {
@@ -336,8 +461,19 @@ export async function isAuthenticated(): Promise<boolean> {
   try {
     const ctx = await getContext();
     const cookies = await ctx.cookies();
-    return authCookieNames(cookies).length > 0;
+    const names = authCookieNames(cookies);
+    const authenticated = names.length > 0;
+    logger.info(
+      {
+        runtimeCookieCount: cookies.length,
+        runtimeAuthCookieNames: names,
+        authenticated,
+      },
+      "computed 1688 authentication status from live Playwright context cookies",
+    );
+    return authenticated;
   } catch {
+    logger.warn("failed to compute 1688 authentication status from live Playwright context");
     return false;
   }
 }
@@ -412,6 +548,20 @@ export async function getSessionStatus(): Promise<SessionStatus> {
 
   const browserRunning = contextPromise !== null;
   const authenticated = browserRunning ? await isAuthenticated() : stateExists;
+
+  logger.info(
+    {
+      profileDir,
+      statePath,
+      stateExists,
+      browserRunning,
+      authenticated,
+      authCalculation: browserRunning
+        ? "browserRunning=true, authenticated=isAuthenticated() from live runtime cookies"
+        : "browserRunning=false, authenticated=stateExists fallback",
+    },
+    "computed admin session status authentication flag",
+  );
 
   return {
     authenticated,
