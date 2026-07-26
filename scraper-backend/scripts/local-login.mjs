@@ -96,8 +96,7 @@ function findCookie(cookies, name) {
   return cookies.find((c) => c.name === name);
 }
 
-async function verifyAuthenticated(context) {
-  const page = await context.newPage();
+async function verifyAuthenticated(page, context) {
   try {
     try {
       await page.goto(HOME_URL, { waitUntil: "networkidle", timeout: 45_000 });
@@ -133,8 +132,9 @@ async function verifyAuthenticated(context) {
       `✓ Verified authenticated at ${finalUrl} (_cn_logon=true, auth cookies: [${presentAuthCookies.join(", ")}], identityUi: ${hasIdentity}).`,
     );
     return true;
-  } finally {
-    await page.close().catch(() => {});
+  } catch (err) {
+    console.log(`  · verification errored: ${err?.message || err}`);
+    return false;
   }
 }
 
@@ -172,6 +172,24 @@ async function uploadState(state) {
   console.log(`✓ Uploaded. Backend response: ${text}`);
 }
 
+function waitForEnter(promptText) {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(promptText);
+    const stdin = process.stdin;
+    const onData = (chunk) => {
+      const s = chunk.toString();
+      if (s.includes("\n") || s.includes("\r")) {
+        stdin.removeListener("data", onData);
+        stdin.pause();
+        resolve();
+      }
+    };
+    stdin.on("error", reject);
+    stdin.resume();
+    stdin.on("data", onData);
+  });
+}
+
 async function main() {
   console.log("• Launching local Chromium (headed)...");
   const browser = await chromium.launch({ headless: false });
@@ -190,47 +208,44 @@ async function main() {
   console.log("• Opening https://login.1688.com — please complete the login manually.");
   await page.goto("https://login.1688.com", { waitUntil: "domcontentloaded" });
 
-  console.log(
-    "• Waiting for a verified signed-in session (polling authenticated page every 5s, 15 min timeout)...",
-  );
-  const start = Date.now();
-  const timeoutMs = 15 * 60 * 1000;
-  let verified = false;
+  console.log("");
+  console.log("──────────────────────────────────────────────────────────────");
+  console.log("  Complete the login in the opened browser window.");
+  console.log("  The script will NOT touch the page until you confirm.");
+  console.log("  When you are fully signed in, return here and press ENTER.");
+  console.log("──────────────────────────────────────────────────────────────");
+  console.log("");
 
-  while (true) {
+  await waitForEnter("→ Press ENTER once login is complete: ");
+
+  if (browserClosed) {
+    throw new AuthenticationFailedError(
+      "Browser was closed before login could be verified.",
+    );
+  }
+
+  console.log("• Verifying authenticated session on the existing tab...");
+  let verified = false;
+  try {
+    verified = await verifyAuthenticated(page, context);
+  } catch (err) {
     if (browserClosed) {
       throw new AuthenticationFailedError(
-        "Browser was closed before login could be positively verified.",
+        "Browser was closed during authentication verification.",
       );
     }
-    if (Date.now() - start > timeoutMs) {
-      throw new AuthenticationFailedError(
-        "Timed out after 15 minutes waiting for a verified login.",
-      );
-    }
-    try {
-      verified = await verifyAuthenticated(context);
-    } catch (err) {
-      if (browserClosed) {
-        throw new AuthenticationFailedError(
-          "Browser was closed during authentication verification.",
-        );
-      }
-      console.log(`  · verification attempt errored: ${err?.message || err}`);
-      verified = false;
-    }
-    if (verified) break;
-    await new Promise((r) => setTimeout(r, 5000));
+    console.log(`  · verification attempt errored: ${err?.message || err}`);
   }
 
   if (!verified) {
-    throw new AuthenticationFailedError("Login was not positively verified.");
+    throw new AuthenticationFailedError(
+      "Login was not positively verified. Nothing was exported.",
+    );
   }
 
   const preExportCookies = await context.cookies();
   const preExportCnLogon = findCookie(preExportCookies, "_cn_logon")?.value ?? "<missing>";
-  const activePage = context.pages()[0];
-  const currentUrl = activePage ? activePage.url() : "<no-page>";
+  const currentUrl = page.url();
   console.log(
     `• Pre-export snapshot: url=${currentUrl} totalCookies=${preExportCookies.length} _cn_logon=${preExportCnLogon}`,
   );
@@ -255,6 +270,7 @@ async function main() {
     console.log("• --keep-open set, leaving browser running. Ctrl+C to exit.");
   }
 }
+
 
 
 main().catch((err) => {
