@@ -38,7 +38,7 @@ function SearchPage() {
   const query = useInfiniteQuery({
     queryKey: ["search", q ?? "", sort ?? "relevance"],
     initialPageParam: 1,
-    queryFn: ({ pageParam }) => catalogService.searchProducts({ query: q, sort, page: pageParam, pageSize: 24 }),
+    queryFn: ({ pageParam }) => catalogService.searchProducts({ query: q, sort, page: pageParam, pageSize: 50 }),
     getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
   });
 
