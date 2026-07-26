@@ -25,6 +25,12 @@ import { logger } from "./logger.js";
 
 const AUTH_COOKIE_HOSTS = [".1688.com", ".taobao.com", ".alibaba.com"];
 const AUTH_COOKIE_NAMES = /^(login_aid|_tb_token_|cookie2|unb|sg|csg|_l_g_|tracknick|_nk_)/i;
+const NAVIGATION_COOKIE_URLS = [
+  "https://www.1688.com",
+  "https://s.1688.com",
+  "https://detail.1688.com",
+  "https://login.taobao.com",
+];
 
 let contextPromise: Promise<BrowserContext> | null = null;
 let lastLoginAt: number | null = null;
@@ -140,8 +146,35 @@ async function addPersistedCookies(ctx: BrowserContext, state: PlaywrightStorage
     await ctx.addCookies(state.cookies);
   }
   const runtime = await ctx.cookies();
+  const applicableToNavigation = await ctx.cookies(NAVIGATION_COOKIE_URLS);
   logger.info({ count: state.cookies.length }, "Loaded cookies");
+  logger.info(
+    {
+      phase,
+      navigationCookieUrls: NAVIGATION_COOKIE_URLS,
+      applicableCount: applicableToNavigation.length,
+      applicableCookies: applicableToNavigation.map(cookieSummary),
+    },
+    "runtime cookies applicable to 1688 navigation targets",
+  );
   logCookieComparison(phase, state.cookies, runtime);
+}
+
+async function logCookiesBeforeNavigation(ctx: BrowserContext, state: PlaywrightStorageState) {
+  const runtime = await ctx.cookies();
+  const applicableToNavigation = await ctx.cookies(NAVIGATION_COOKIE_URLS);
+  logger.info(
+    {
+      phase: "before_first_navigation",
+      runtimeCount: runtime.length,
+      runtimeCookies: runtime.map(cookieSummary),
+      navigationCookieUrls: NAVIGATION_COOKIE_URLS,
+      applicableCount: applicableToNavigation.length,
+      applicableCookies: applicableToNavigation.map(cookieSummary),
+    },
+    "context.cookies() immediately before first navigation",
+  );
+  logCookieComparison("before_first_navigation", state.cookies, runtime);
 }
 
 async function launchHeadless(): Promise<BrowserContext> {
@@ -205,8 +238,7 @@ export async function withContext<T>(
   const ctx = await getContext();
   const state = await readPersistedState(authStatePath());
   if (state) {
-    const runtime = await ctx.cookies();
-    logCookieComparison("before_first_navigation", state.cookies, runtime);
+    await logCookiesBeforeNavigation(ctx, state);
   }
   return fn(ctx);
 }
@@ -269,10 +301,12 @@ export async function importStorageState(state: {
   }
 
   // 3. Recreate now and re-apply cookies in-memory so the first request
-  //    after upload already uses the authenticated session.
+  //    after upload already uses the authenticated session. Do not overwrite
+  //    AUTH_STATE_PATH with Chromium's runtime snapshot here — keeping the
+  //    operator-uploaded file intact lets us compare uploaded vs runtime
+  //    cookies exactly when diagnosing propagation issues.
   const ctx = await getContext();
   await addPersistedCookies(ctx, { cookies: incoming, origins: [] }, "auth_upload_recreate");
-  await ctx.storageState({ path });
 
   const finalCookies = await ctx.cookies();
   logger.info(
