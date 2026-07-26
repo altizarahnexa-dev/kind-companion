@@ -25,6 +25,9 @@ v1Router.use(globalLimiter);
 // Session/cookie management for the persistent Chromium context.
 v1Router.use("/auth", authRouter);
 
+// Operator admin — persistent session status + manual login mode.
+v1Router.use("/admin", adminRouter);
+
 // Diagnostics (Playwright infra checks — not part of the sourcing contract)
 v1Router.use("/diagnostics", diagnosticsRouter);
 
