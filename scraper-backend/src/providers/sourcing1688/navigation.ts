@@ -104,6 +104,7 @@ export async function navigateToSearchResults(
   // Path A — direct
   try {
     await page.goto(directUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await probePostNavigation(page, "search_direct");
     await page.waitForURL(RESULTS_URL_PATTERN, { timeout: 8_000 }).catch(() => {});
     if (RESULTS_URL_PATTERN.test(page.url())) {
       await page
