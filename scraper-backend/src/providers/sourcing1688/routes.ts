@@ -17,6 +17,7 @@ import { extractProductDetail } from "./parsers/product-detail.js";
 import { extractProductVariants } from "./parsers/product-variants.js";
 import { captureParseFailure } from "../../lib/debug-capture.js";
 import { detectLoginWall } from "../../lib/login-detect.js";
+import { detectDemoCategory, paginateDemo } from "./demo-catalog.js";
 
 /**
  * 1688 provider routes — the sourcing contract endpoints.
@@ -161,6 +162,34 @@ sourcing1688Router.get(
       { requestId: req.requestId, provider: PROVIDER, q: keyword, page: query.page },
       "1688 search: begin",
     );
+
+    // ---- Demo-mode short circuit -----------------------------------------
+    // While the live scraper is not authenticated, canned catalogues serve
+    // the "shoes" and "backpacks" verticals so the UI stays fully usable.
+    const demoCategory = detectDemoCategory(keyword);
+    if (demoCategory) {
+      try {
+        const demo = await paginateDemo(demoCategory, query.page, query.pageSize);
+        return sendSuccess(res, {
+          provider: PROVIDER,
+          requestId: req.requestId,
+          data: { items: demo.items },
+          meta: {
+            page: demo.page,
+            pageSize: demo.pageSize,
+            total: demo.total,
+            hasMore: demo.hasMore,
+            nextPage: demo.nextPage,
+            demo: true,
+            demoCategory,
+          },
+          cache: { hit: true, ageSeconds: 0, ttlSeconds: 3600 },
+        });
+      } catch (err) {
+        return next(mapPlaywrightError(err, "demo_catalog"));
+      }
+    }
+
 
     try {
       const raw = await withContext(async (ctx) => {
