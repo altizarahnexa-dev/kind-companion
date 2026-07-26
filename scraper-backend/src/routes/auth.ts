@@ -1,6 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
-import express from "express";
 import {
   exportStorageState,
   importStorageState,
@@ -29,20 +28,17 @@ const StorageStateSchema = z.object({
         value: z.string(),
         domain: z.string(),
         path: z.string(),
-        expires: z.number().optional(),
-        httpOnly: z.boolean().optional(),
-        secure: z.boolean().optional(),
-        sameSite: z.enum(["Strict", "Lax", "None"]).optional(),
-      }),
+        expires: z.number(),
+        httpOnly: z.boolean(),
+        secure: z.boolean(),
+        sameSite: z.enum(["Strict", "Lax", "None"]),
+      }).passthrough(),
     )
     .default([]),
   origins: z.array(z.unknown()).optional(),
-});
+}).passthrough();
 
 export const authRouter: Router = Router();
-
-// Accept larger JSON bodies here (cookie exports can be > 64kb).
-const jsonParser = express.json({ limit: "2mb" });
 
 authRouter.get(
   "/1688/status",
@@ -78,7 +74,6 @@ authRouter.get(
 
 authRouter.post(
   "/1688/cookies",
-  jsonParser,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = StorageStateSchema.safeParse(req.body);
