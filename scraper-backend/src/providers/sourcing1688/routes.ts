@@ -176,10 +176,9 @@ sourcing1688Router.get(
             const wall = await detectLoginWall(page);
             if (wall.isLoginWall) {
               throw new HttpError({
-                status: 503,
+                status: 401,
                 code: "authentication_required",
-                message:
-                  "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+                message: "1688 login required",
                 retryable: false,
                 details: { phase: "navigate", url: wall.url, reason: wall.reason },
               });
@@ -190,10 +189,9 @@ sourcing1688Router.get(
           const wall = await detectLoginWall(page);
           if (wall.isLoginWall) {
             throw new HttpError({
-              status: 503,
+              status: 401,
               code: "authentication_required",
-              message:
-                "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+              message: "1688 login required",
               retryable: false,
               details: { phase: "post_navigate", url: wall.url, reason: wall.reason },
             });
@@ -204,10 +202,9 @@ sourcing1688Router.get(
             const wallAfterParse = await detectLoginWall(page);
             if (wallAfterParse.isLoginWall) {
               throw new HttpError({
-                status: 503,
+                status: 401,
                 code: "authentication_required",
-                message:
-                  "1688 redirected to a login wall. Import fresh cookies via POST /v1/auth/1688/cookies.",
+                message: "1688 login required",
                 retryable: false,
                 details: {
                   phase: "parse",
