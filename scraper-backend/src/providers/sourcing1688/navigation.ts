@@ -170,6 +170,7 @@ export async function navigateToProductDetail(
 ): Promise<void> {
   const url = buildProductDetailUrl(externalId);
   const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await probePostNavigation(page, "product_detail");
   const status = response?.status() ?? 0;
   if (status === 404) {
     throw new HttpError({
