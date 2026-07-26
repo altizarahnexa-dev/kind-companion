@@ -48,7 +48,6 @@ adminRouter.post(
         data: {
           opened: !result.alreadyOpen,
           alreadyOpen: result.alreadyOpen,
-          profileDir: result.profileDir,
           loginUrl: "https://login.1688.com",
           message: result.alreadyOpen
             ? "Headed login browser is already running. Complete login in that window; cookies will save automatically."
