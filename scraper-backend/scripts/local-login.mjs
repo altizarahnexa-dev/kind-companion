@@ -92,6 +92,10 @@ async function pageHasIdentityMarker(page) {
   }
 }
 
+function findCookie(cookies, name) {
+  return cookies.find((c) => c.name === name);
+}
+
 async function verifyAuthenticated(context) {
   const page = await context.newPage();
   try {
@@ -105,29 +109,35 @@ async function verifyAuthenticated(context) {
       }
     }
     const finalUrl = page.url();
+    const cookies = await context.cookies();
+    const cnLogon = findCookie(cookies, "_cn_logon");
+    const cnLogonValue = cnLogon?.value ?? "<missing>";
+    const presentAuthCookies = cookies
+      .map((c) => c.name)
+      .filter((n) => AUTH_COOKIE_NAMES.has(n));
+    console.log(
+      `  · probe: url=${finalUrl} totalCookies=${cookies.length} _cn_logon=${cnLogonValue} authCookies=[${presentAuthCookies.join(", ")}]`,
+    );
     if (isLoginHost(finalUrl)) {
       console.log(`  · homepage → redirected to login (${finalUrl}), not signed in yet.`);
       return false;
     }
-    const cookies = await context.cookies();
-    const presentAuthCookies = cookies
-      .map((c) => c.name)
-      .filter((n) => AUTH_COOKIE_NAMES.has(n));
-    const hasIdentity = await pageHasIdentityMarker(page);
-    if (presentAuthCookies.length === 0 && !hasIdentity) {
+    if (cnLogonValue !== "true") {
       console.log(
-        `  · homepage ${finalUrl} → no auth cookies and no logged-in UI markers detected.`,
+        `  · _cn_logon is not "true" (got "${cnLogonValue}") — session is not authenticated yet.`,
       );
       return false;
     }
+    const hasIdentity = await pageHasIdentityMarker(page);
     console.log(
-      `✓ Verified authenticated at ${finalUrl} (auth cookies: [${presentAuthCookies.join(", ")}], identityUi: ${hasIdentity}).`,
+      `✓ Verified authenticated at ${finalUrl} (_cn_logon=true, auth cookies: [${presentAuthCookies.join(", ")}], identityUi: ${hasIdentity}).`,
     );
     return true;
   } finally {
     await page.close().catch(() => {});
   }
 }
+
 
 async function uploadState(state) {
   if (NO_UPLOAD) {
