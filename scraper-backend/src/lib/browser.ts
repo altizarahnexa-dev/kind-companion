@@ -29,12 +29,119 @@ const AUTH_COOKIE_NAMES = /^(login_aid|_tb_token_|cookie2|unb|sg|csg|_l_g_|track
 let contextPromise: Promise<BrowserContext> | null = null;
 let lastLoginAt: number | null = null;
 
+type PlaywrightStorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
+type PlaywrightCookie = PlaywrightStorageState["cookies"][number];
+
+interface CookieAuditSummary {
+  name: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: string;
+}
+
+interface CookieComparison {
+  uploadedCount: number;
+  runtimeCount: number;
+  missingCount: number;
+  missing: CookieAuditSummary[];
+  authCookieNames: string[];
+}
+
 export function userDataDir(): string {
   return process.env.USER_DATA_DIR?.trim() || "/data/browser-profile";
 }
 
 export function authStatePath(): string {
   return process.env.AUTH_STATE_PATH?.trim() || "/data/1688-state.json";
+}
+
+function cookieKey(cookie: Pick<PlaywrightCookie, "name" | "domain" | "path">): string {
+  return `${cookie.domain}\t${cookie.path}\t${cookie.name}`;
+}
+
+function cookieSummary(cookie: PlaywrightCookie): CookieAuditSummary {
+  return {
+    name: cookie.name,
+    domain: cookie.domain,
+    path: cookie.path,
+    expires: cookie.expires,
+    httpOnly: cookie.httpOnly,
+    secure: cookie.secure,
+    sameSite: cookie.sameSite,
+  };
+}
+
+function authCookieNames(cookies: PlaywrightCookie[]): string[] {
+  return cookies
+    .filter(
+      (c) =>
+        AUTH_COOKIE_HOSTS.some((h) => c.domain.endsWith(h)) &&
+        AUTH_COOKIE_NAMES.test(c.name),
+    )
+    .map((c) => c.name);
+}
+
+function compareCookies(uploaded: PlaywrightCookie[], runtime: PlaywrightCookie[]): CookieComparison {
+  const runtimeKeys = new Set(runtime.map(cookieKey));
+  const missing = uploaded.filter((cookie) => !runtimeKeys.has(cookieKey(cookie))).map(cookieSummary);
+  return {
+    uploadedCount: uploaded.length,
+    runtimeCount: runtime.length,
+    missingCount: missing.length,
+    missing,
+    authCookieNames: authCookieNames(runtime),
+  };
+}
+
+function logCookieComparison(phase: string, uploaded: PlaywrightCookie[], runtime: PlaywrightCookie[]) {
+  const comparison = compareCookies(uploaded, runtime);
+  logger.info(
+    {
+      phase,
+      uploadedCookies: uploaded.map(cookieSummary),
+      runtimeCookies: runtime.map(cookieSummary),
+      uploadedCount: comparison.uploadedCount,
+      runtimeCount: comparison.runtimeCount,
+      missingCount: comparison.missingCount,
+      missingCookies: comparison.missing,
+      authCookies: comparison.authCookieNames,
+      possibleDropReasons:
+        comparison.runtimeCount < comparison.uploadedCount
+          ? [
+              "Chromium rejected expired cookies.",
+              "Chromium rejected cookies with invalid domain/path attributes.",
+              "Chromium normalized or deduplicated cookies with the same domain/path/name.",
+            ]
+          : [],
+    },
+    "uploaded cookies vs runtime cookies",
+  );
+}
+
+async function readPersistedState(path: string): Promise<PlaywrightStorageState | null> {
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as Partial<PlaywrightStorageState>;
+    return {
+      cookies: parsed.cookies ?? [],
+      origins: parsed.origins ?? [],
+    };
+  } catch (err) {
+    logger.warn({ err, statePath: path }, "failed to load storage state file");
+    return null;
+  }
+}
+
+async function addPersistedCookies(ctx: BrowserContext, state: PlaywrightStorageState, phase: string) {
+  if (state.cookies.length) {
+    await ctx.addCookies(state.cookies);
+  }
+  const runtime = await ctx.cookies();
+  logger.info({ count: state.cookies.length }, "Loaded cookies");
+  logCookieComparison(phase, state.cookies, runtime);
 }
 
 async function launchHeadless(): Promise<BrowserContext> {
@@ -64,17 +171,9 @@ async function launchHeadless(): Promise<BrowserContext> {
   });
 
   if (hasState) {
-    try {
-      const raw = await readFile(statePath, "utf8");
-      const parsed = JSON.parse(raw) as {
-        cookies?: Parameters<BrowserContext["addCookies"]>[0];
-      };
-      if (parsed.cookies?.length) {
-        await ctx.addCookies(parsed.cookies);
-        logger.info({ count: parsed.cookies.length }, "loaded cookies from state file");
-      }
-    } catch (err) {
-      logger.warn({ err, statePath }, "failed to load storage state file");
+    const state = await readPersistedState(statePath);
+    if (state) {
+      await addPersistedCookies(ctx, state, "launchPersistentContext");
     }
   }
 
@@ -104,6 +203,11 @@ export async function withContext<T>(
   fn: (ctx: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const ctx = await getContext();
+  const state = await readPersistedState(authStatePath());
+  if (state) {
+    const runtime = await ctx.cookies();
+    logCookieComparison("before_first_navigation", state.cookies, runtime);
+  }
   return fn(ctx);
 }
 
@@ -127,19 +231,13 @@ export async function isAuthenticated(): Promise<boolean> {
   try {
     const ctx = await getContext();
     const cookies = await ctx.cookies();
-    return cookies.some(
-      (c) =>
-        AUTH_COOKIE_HOSTS.some((h) => c.domain.endsWith(h)) &&
-        AUTH_COOKIE_NAMES.test(c.name),
-    );
+    return authCookieNames(cookies).length > 0;
   } catch {
     return false;
   }
 }
 
-export async function exportStorageState(): Promise<Awaited<
-  ReturnType<BrowserContext["storageState"]>
->> {
+export async function exportStorageState(): Promise<PlaywrightStorageState> {
   const ctx = await getContext();
   return ctx.storageState();
 }
@@ -151,7 +249,7 @@ export async function exportStorageState(): Promise<Awaited<
  * restarts. Returns the number of cookies applied.
  */
 export async function importStorageState(state: {
-  cookies?: Parameters<BrowserContext["addCookies"]>[0];
+  cookies?: PlaywrightCookie[];
   origins?: unknown[];
 }): Promise<{ cookies: number; path: string }> {
   const path = authStatePath();
@@ -173,21 +271,12 @@ export async function importStorageState(state: {
   // 3. Recreate now and re-apply cookies in-memory so the first request
   //    after upload already uses the authenticated session.
   const ctx = await getContext();
-  if (incoming.length) {
-    await ctx.addCookies(incoming);
-  }
+  await addPersistedCookies(ctx, { cookies: incoming, origins: [] }, "auth_upload_recreate");
   await ctx.storageState({ path });
 
   const finalCookies = await ctx.cookies();
-  const authNames = finalCookies
-    .filter(
-      (c) =>
-        AUTH_COOKIE_HOSTS.some((h) => c.domain.endsWith(h)) &&
-        AUTH_COOKIE_NAMES.test(c.name),
-    )
-    .map((c) => c.name);
   logger.info(
-    { loaded: incoming.length, total: finalCookies.length, authCookies: authNames },
+    { loaded: incoming.length, total: finalCookies.length, authCookies: authCookieNames(finalCookies) },
     "browser recreated after auth upload",
   );
 
