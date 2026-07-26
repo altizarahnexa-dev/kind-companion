@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../middleware/auth.js";
 import { globalLimiter } from "../middleware/rate-limit.js";
 import { healthRouter } from "./health.js";
 import { authRouter } from "./auth.js";
+import { adminRouter } from "./admin.js";
 import { sourcing1688Router } from "../providers/sourcing1688/routes.js";
 import { diagnosticsRouter } from "./diagnostics.js";
 
