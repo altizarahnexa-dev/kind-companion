@@ -46,6 +46,12 @@ RUN apt-get update \
 # Reuse it instead of creating our own.
 WORKDIR /app
 
+# Pre-create /data and hand ownership to pwuser so the mounted volume
+# inherits the correct permissions on first run. Docker copies the
+# ownership of the mountpoint directory into a fresh named volume.
+RUN mkdir -p /data/browser-profile \
+ && chown -R pwuser:pwuser /data
+
 COPY --from=build --chown=pwuser:pwuser /app/node_modules ./node_modules
 COPY --from=build --chown=pwuser:pwuser /app/dist ./dist
 COPY --chown=pwuser:pwuser package.json ./
