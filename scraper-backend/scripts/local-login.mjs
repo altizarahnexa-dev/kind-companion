@@ -30,9 +30,15 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 
-const VERIFY_URL = "https://air.1688.com/app/ctm-mmp/member-common/index.html";
-const VERIFY_FALLBACK_URL = "https://work.1688.com/";
-const LOGIN_HOST_PATTERN = /(^|\.)(login|passport|auth)\.(1688|taobao|tmall|alibaba)\.com/i;
+const HOME_URL = "https://www.1688.com/";
+const LOGIN_HOST_PATTERN = /(^|\.)(login|passport)\.(1688|taobao|tmall|alibaba)\.com/i;
+const AUTH_COOKIE_NAMES = new Set([
+  "_m_h5_tk",
+  "_m_h5_tk_enc",
+  "cna",
+  "cookie2",
+  "xlly_s",
+]);
 const IDENTITY_SELECTORS = [
   "a[href*='logout']",
   "a[href*='member.1688.com']",
@@ -89,26 +95,35 @@ async function pageHasIdentityMarker(page) {
 async function verifyAuthenticated(context) {
   const page = await context.newPage();
   try {
-    for (const url of [VERIFY_URL, VERIFY_FALLBACK_URL]) {
+    try {
+      await page.goto(HOME_URL, { waitUntil: "networkidle", timeout: 45_000 });
+    } catch {
       try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await page.goto(HOME_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
       } catch {
-        continue;
+        return false;
       }
-      const finalUrl = page.url();
-      if (isLoginHost(finalUrl)) {
-        console.log(`  · ${url} → redirected to login (${finalUrl}), not signed in yet.`);
-        continue;
-      }
-      const hasIdentity = await pageHasIdentityMarker(page);
-      if (!hasIdentity) {
-        console.log(`  · ${url} → no logged-in UI markers detected at ${finalUrl}.`);
-        continue;
-      }
-      console.log(`✓ Verified authenticated session at ${finalUrl}`);
-      return true;
     }
-    return false;
+    const finalUrl = page.url();
+    if (isLoginHost(finalUrl)) {
+      console.log(`  · homepage → redirected to login (${finalUrl}), not signed in yet.`);
+      return false;
+    }
+    const cookies = await context.cookies();
+    const presentAuthCookies = cookies
+      .map((c) => c.name)
+      .filter((n) => AUTH_COOKIE_NAMES.has(n));
+    const hasIdentity = await pageHasIdentityMarker(page);
+    if (presentAuthCookies.length === 0 && !hasIdentity) {
+      console.log(
+        `  · homepage ${finalUrl} → no auth cookies and no logged-in UI markers detected.`,
+      );
+      return false;
+    }
+    console.log(
+      `✓ Verified authenticated at ${finalUrl} (auth cookies: [${presentAuthCookies.join(", ")}], identityUi: ${hasIdentity}).`,
+    );
+    return true;
   } finally {
     await page.close().catch(() => {});
   }
