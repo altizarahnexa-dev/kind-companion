@@ -133,6 +133,7 @@ export async function navigateToSearchResults(
   }
   if (!filled) {
     await page.goto(directUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await probePostNavigation(page, "search_direct_fallback");
     if (!RESULTS_URL_PATTERN.test(page.url())) {
       throw new HttpError({
         status: 502,
