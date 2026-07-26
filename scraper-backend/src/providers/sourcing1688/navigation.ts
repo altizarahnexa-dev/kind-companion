@@ -118,6 +118,7 @@ export async function navigateToSearchResults(
 
   // Path B — homepage form
   await page.goto(HOMEPAGE_URL, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await probePostNavigation(page, "search_homepage");
   let filled = false;
   for (const selector of SEARCH_INPUT_SELECTORS) {
     const input = page.locator(selector).first();
