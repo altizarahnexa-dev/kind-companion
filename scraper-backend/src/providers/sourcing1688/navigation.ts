@@ -1,5 +1,54 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Page } from "playwright";
 import { HttpError } from "../../lib/http-error.js";
+import { logger } from "../../lib/logger.js";
+
+const DEBUG_DIR = "/tmp/debug";
+
+async function probePostNavigation(page: Page, phase: string): Promise<void> {
+  let url = "";
+  let title = "";
+  let htmlHead = "";
+  let cookies1688: unknown = [];
+  let cookiesTaobaoLogin: unknown = [];
+  let documentCookie = "";
+  let jsState: unknown = null;
+
+  try { url = page.url(); } catch { /* ignore */ }
+  try { title = await page.title(); } catch { /* ignore */ }
+  try { htmlHead = (await page.content()).slice(0, 5000); } catch { /* ignore */ }
+  try { cookies1688 = await page.context().cookies("https://www.1688.com"); } catch { /* ignore */ }
+  try { cookiesTaobaoLogin = await page.context().cookies("https://login.taobao.com"); } catch { /* ignore */ }
+  try { documentCookie = await page.evaluate(() => document.cookie); } catch { /* ignore */ }
+  try {
+    jsState = await page.evaluate(() => ({
+      location: location.href,
+      origin: location.origin,
+      hostname: location.hostname,
+      readyState: document.readyState,
+    }));
+  } catch { /* ignore */ }
+
+  logger.warn(
+    { phase, url, title, htmlHead, cookies1688, cookiesTaobaoLogin, documentCookie, jsState },
+    "nav_probe: post-navigation state",
+  );
+
+  if (/login\.(taobao|1688|alibaba)\.com/i.test(url)) {
+    try {
+      await mkdir(DEBUG_DIR, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const base = join(DEBUG_DIR, `${stamp}_${phase}`);
+      try { await page.screenshot({ path: `${base}.png`, fullPage: true }); } catch { /* ignore */ }
+      try { await writeFile(`${base}.html`, await page.content(), "utf8"); } catch { /* ignore */ }
+      await writeFile(`${base}.url.txt`, url, "utf8");
+      logger.warn({ base, url }, "nav_probe: login redirect artifacts saved");
+    } catch (err) {
+      logger.warn({ err }, "nav_probe: failed to persist debug artifacts");
+    }
+  }
+}
 
 /**
  * Shared 1688 navigation helpers. Route handlers MUST use these — they
@@ -55,6 +104,7 @@ export async function navigateToSearchResults(
   // Path A — direct
   try {
     await page.goto(directUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await probePostNavigation(page, "search_direct");
     await page.waitForURL(RESULTS_URL_PATTERN, { timeout: 8_000 }).catch(() => {});
     if (RESULTS_URL_PATTERN.test(page.url())) {
       await page
@@ -68,6 +118,7 @@ export async function navigateToSearchResults(
 
   // Path B — homepage form
   await page.goto(HOMEPAGE_URL, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await probePostNavigation(page, "search_homepage");
   let filled = false;
   for (const selector of SEARCH_INPUT_SELECTORS) {
     const input = page.locator(selector).first();
@@ -82,6 +133,7 @@ export async function navigateToSearchResults(
   }
   if (!filled) {
     await page.goto(directUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await probePostNavigation(page, "search_direct_fallback");
     if (!RESULTS_URL_PATTERN.test(page.url())) {
       throw new HttpError({
         status: 502,
@@ -118,6 +170,7 @@ export async function navigateToProductDetail(
 ): Promise<void> {
   const url = buildProductDetailUrl(externalId);
   const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await probePostNavigation(page, "product_detail");
   const status = response?.status() ?? 0;
   if (status === 404) {
     throw new HttpError({
