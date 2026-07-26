@@ -24,7 +24,10 @@ import { logger } from "./logger.js";
  */
 
 const AUTH_COOKIE_HOSTS = [".1688.com", ".taobao.com", ".alibaba.com"];
-const AUTH_COOKIE_NAMES = /^(login_aid|_tb_token_|cookie2|unb|sg|csg|_l_g_|tracknick|_nk_)/i;
+// Strong signed-in cookies only. Do not include weak anonymous/session
+// scaffolding such as `_tb_token_`, `cookie2`, `sg`, or `csg`: those can be
+// present before login and caused health/status to report false positives.
+const AUTH_COOKIE_NAMES = /^(login_aid|unb|sgcookie|_l_g_|tracknick|_nk_|lgc|cookie17|dnk|skt|uc1|uc3)$/i;
 const NAVIGATION_COOKIE_URLS = [
   "https://www.1688.com",
   "https://s.1688.com",
