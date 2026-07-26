@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../middleware/auth.js";
 import { globalLimiter } from "../middleware/rate-limit.js";
 import { healthRouter } from "./health.js";
 import { authRouter } from "./auth.js";
+import { adminRouter } from "./admin.js";
 import { sourcing1688Router } from "../providers/sourcing1688/routes.js";
 import { diagnosticsRouter } from "./diagnostics.js";
 
@@ -23,6 +24,9 @@ v1Router.use(globalLimiter);
 
 // Session/cookie management for the persistent Chromium context.
 v1Router.use("/auth", authRouter);
+
+// Operator admin — persistent session status + manual login mode.
+v1Router.use("/admin", adminRouter);
 
 // Diagnostics (Playwright infra checks — not part of the sourcing contract)
 v1Router.use("/diagnostics", diagnosticsRouter);
