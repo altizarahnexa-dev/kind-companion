@@ -1,4 +1,4 @@
-import { chromium, type BrowserContext, type Cookie, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -49,7 +49,7 @@ export function authStatePath(): string {
   return process.env.AUTH_STATE_PATH?.trim() || "/data/1688-state.json";
 }
 
-function authCookieNames(cookies: Cookie[]): string[] {
+function authCookieNames(cookies: Pick<PlaywrightCookie, "domain" | "name">[]): string[] {
   return cookies
     .filter(
       (cookie) =>
